@@ -681,6 +681,7 @@ pub fn rpr(w: &mut Writer, out: &mut dyn Sink, tag: &str, r: &RunProps) {
     let a = A::new()
         .o("lang", r.lang.as_deref().filter(|l| !l.is_empty()))
         .o("altLang", r.alt_lang.as_deref().filter(|l| !l.is_empty()))
+        .b("kumimoji", r.kumimoji)
         .o("sz", r.size.map(|s| (s.clamp(1.0, 4000.0) * 100.0).round() as i64))
         .b("b", r.bold)
         .b("i", r.italic)

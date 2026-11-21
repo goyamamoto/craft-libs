@@ -510,6 +510,9 @@ pub struct RunProps {
     pub lang: Option<String>,
     #[serde(deserialize_with = "bounded_language")]
     pub alt_lang: Option<String>,
+    /// `kumimoji`: the run was set with East Asian composition rules; kept for round trip.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kumimoji: Option<bool>,
     pub shadow: Option<crate::style::Shadow>,
     /// `a:innerShdw` on the run. Outer shadow stays in `shadow`.
     pub inner_shadow: Option<crate::style::Shadow>,
@@ -556,6 +559,7 @@ impl RunProps {
             hover,
             lang,
             alt_lang,
+            kumimoji,
             shadow,
             inner_shadow,
             glow,

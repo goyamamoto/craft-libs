@@ -360,6 +360,10 @@ impl Default for ChartDataTable {
     }
 }
 
+fn no_title_dirs(d: &(Option<crate::text::TextDir>, Option<crate::text::TextDir>)) -> bool {
+    d.0.is_none() && d.1.is_none()
+}
+
 fn is_zero_u16(v: &u16) -> bool {
     *v == 0
 }
@@ -390,6 +394,11 @@ pub struct Chart {
     /// `c:minorGridlines` on the value axis: five to a major unit, between the major ones.
     pub minor_gridlines: bool,
     pub axis_titles: (Option<String>, Option<String>),
+    /// Each axis title's Title ▸ Text direction, such as stacked (`wordArtVert`, 縦書き) or East
+    /// Asian vertical (`eaVert`) text: the title's `a:bodyPr/@vert`. `None` is PowerPoint's
+    /// default, a vertical axis's title turned to read upwards.
+    #[serde(default, skip_serializing_if = "no_title_dirs")]
+    pub axis_title_dirs: (Option<crate::text::TextDir>, Option<crate::text::TextDir>),
     /// Chart style number (1–48) and colour palette (`colorful1`, `monochrome3`…).
     pub style: u32,
     pub palette: String,
@@ -538,6 +547,7 @@ impl Default for Chart {
             gridlines: true,
             minor_gridlines: false,
             axis_titles: (None, None),
+            axis_title_dirs: (None, None),
             style: 2,
             palette: "colorful1".into(),
             plot_fill: None,

@@ -578,6 +578,15 @@ fn read_presentation_settings(imp: &mut Imp, p: &mut Presentation, pres_part: &P
     if let Some(dts) = pres_el.child(Local("defaultTextStyle")) {
         p.default_text_style = dml::list_style(&mut Src(imp, pres_part), dts);
     }
+    if let Some(k) = pres_el.child(Local("kinsoku")) {
+        // Hostile files: a line-breaking list is a few dozen characters, never megabytes.
+        let list = |name: &str| k.attr_local(name).unwrap_or("").chars().take(4096).collect::<String>();
+        p.kinsoku = Some(crate::Kinsoku {
+            lang: k.attr_local("lang").map(str::trim).filter(|l| !l.is_empty()).map(String::from),
+            start: list("invalStChars"),
+            end: list("invalEndChars"),
+        });
+    }
     if let Some(r) = pres_part.rels.first("tableStyles")
         && let Some(d) = load(imp.pkg, &r.target)
     {

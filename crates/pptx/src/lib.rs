@@ -1056,6 +1056,19 @@ pub struct KeptPart {
     pub from_root: bool,
 }
 
+/// A deck's own line-breaking characters (`p:kinsoku`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Kinsoku {
+    /// BCP 47 language the lists are for (`ja-JP`); `None` when the file names none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
+    /// `invalStChars`: no line starts with one of these.
+    pub start: String,
+    /// `invalEndChars`: no line ends with one of these.
+    pub end: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Presentation {
@@ -1077,6 +1090,10 @@ pub struct Presentation {
     pub props: Properties,
     /// Presentation-wide default text style (shapes that aren't placeholders).
     pub default_text_style: text::ListStyle,
+    /// Custom line-breaking characters (`p:kinsoku`, PowerPoint's Asian typography options): the
+    /// deck's own lists in place of the standard Japanese ones.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kinsoku: Option<Kinsoku>,
     pub media: Vec<MediaItem>,
     pub first_slide_number: u32,
     /// Next free shape/slide/layout/media id.
@@ -1127,6 +1144,7 @@ impl Default for Presentation {
             header_footer: HeaderFooter::default(),
             props: Properties::default(),
             default_text_style: text::ListStyle::default(),
+            kinsoku: None,
             media: vec![],
             first_slide_number: 1,
             next_id: 0,

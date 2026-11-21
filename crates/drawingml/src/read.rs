@@ -570,7 +570,9 @@ fn typeface(e: &El) -> Option<String> {
 pub fn rpr(src: &mut dyn Source, r: &El) -> RunProps {
     let mut p = RunProps {
         lang: r.attr_local("lang").map(String::from),
-        alt_lang: r.attr_local("altLang").map(|lang| lang.chars().take(256).collect()),
+        // An empty or blank `altLang` names no language: none is kept.
+        alt_lang: r.attr_local("altLang").map(str::trim).filter(|l| !l.is_empty()).map(|lang| lang.chars().take(256).collect()),
+        kumimoji: r.attr_local("kumimoji").and_then(value::to_bool),
         size: r.attr_local("sz").and_then(value::to_f64).map(|s| (s / 100.0).clamp(1.0, 4000.0)),
         bold: r.attr_local("b").and_then(value::to_bool),
         italic: r.attr_local("i").and_then(value::to_bool),
@@ -683,8 +685,16 @@ fn push_text_runs(para: &mut Paragraph, props: RunProps, text: &str) {
     }
 }
 
-/// Appends an Office Math (a14:m) run: its plain text and its OMML.
-fn push_math_run(para: &mut Paragraph, src: &dyn Source, e: &El) {
+/// The formatting of Office Math (a14:m) run `e` (the math font, size, colour): the first `a:rPr`
+/// inside, as PowerPoint writes one in every `m:r` (`m:rPr` is the equation's own style, not
+/// DrawingML's).
+fn math_run_props(src: &mut dyn Source, e: &El) -> RunProps {
+    e.find("a:rPr").map(|r| rpr(src, r)).unwrap_or_default()
+}
+
+/// Appends an Office Math (a14:m) run with formatting `props` ([`math_run_props`]): its plain
+/// text and its OMML.
+fn push_math_run(para: &mut Paragraph, src: &dyn Source, e: &El, props: RunProps) {
     if para.runs.len() < MAX_PARAGRAPH_RUNS {
         // The text of the outermost `t` elements: a `t` nested in another is already part of
         // the outer one's text, and taking it again would copy it once per nesting level.
@@ -703,7 +713,7 @@ fn push_math_run(para: &mut Paragraph, src: &dyn Source, e: &El) {
         let mut text = String::new();
         outer_t(e, 0, &mut text);
         let omml = e.elements().map(|c| src.keep_inner(c)).collect::<String>();
-        para.runs.push(Run { text, props: RunProps::default(), kind: RunKind::Math { omml } });
+        para.runs.push(Run { text, props, kind: RunKind::Math { omml } });
     }
 }
 
@@ -733,7 +743,10 @@ pub fn paragraph(src: &mut dyn Source, p: &El) -> Paragraph {
                 let text = e.child(Local("t")).map(|t| t.deep_text()).unwrap_or_default();
                 para.runs.push(Run { text, props, kind: RunKind::Field { field: e.attr_local("type").unwrap_or("").to_string() } });
             }
-            "m" => push_math_run(&mut para, &*src, e),
+            "m" => {
+                let props = math_run_props(src, e);
+                push_math_run(&mut para, &*src, e, props);
+            }
             "endParaRPr" => para.end_props = rpr(src, e),
             _ => {}
         }
@@ -746,13 +759,41 @@ mod tests {
     use super::*;
     use crate::xmlx::parse;
 
+    /// An equation run takes the formatting of the first `a:rPr` inside it (PowerPoint writes one
+    /// in every `m:r`), so it is drawn in its own font, size and colour, not the defaults.
+    #[test]
+    fn a_math_run_keeps_its_drawingml_formatting() {
+        let x = r#"<a:p xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><a14:m><m:oMathPara><m:oMath><m:r><m:rPr><m:sty m:val="p"/></m:rPr><a:rPr lang="ja-JP" altLang="en-US" sz="3200" b="1"><a:latin typeface="Cambria Math"/></a:rPr><m:t>x</m:t></m:r></m:oMath></m:oMathPara></a14:m></a:p>"#;
+        let d = parse(x.as_bytes()).unwrap();
+        let para = paragraph(&mut crate::part::NoSource, &d);
+        let r = &para.runs[0];
+        assert!(matches!(r.kind, RunKind::Math { .. }));
+        assert_eq!((r.props.size, r.props.bold, r.props.lang.as_deref()), (Some(32.0), Some(true), Some("ja-JP")));
+        assert_eq!(r.props.font.as_deref(), Some("Cambria Math"));
+        // Without one, the defaults.
+        let x = r#"<a:p xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"><a14:m><m:oMath><m:r><m:t>y</m:t></m:r></m:oMath></a14:m></a:p>"#;
+        let para = paragraph(&mut crate::part::NoSource, &parse(x.as_bytes()).unwrap());
+        assert_eq!(para.runs[0].props, RunProps::default());
+    }
+
+    /// `kumimoji` (East Asian composition) is read; a blank `altLang` names no language.
+    #[test]
+    fn kumimoji_is_read_and_a_blank_alt_lang_is_none() {
+        let x = r#"<a:rPr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" lang="ja-JP" altLang="  " kumimoji="1"/>"#;
+        let p = rpr(&mut crate::part::NoSource, &parse(x.as_bytes()).unwrap());
+        assert_eq!((p.kumimoji, p.alt_lang), (Some(true), None));
+        let x = r#"<a:rPr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" lang="ja-JP" altLang="en-US"/>"#;
+        let p = rpr(&mut crate::part::NoSource, &parse(x.as_bytes()).unwrap());
+        assert_eq!((p.kumimoji, p.alt_lang.as_deref()), (None, Some("en-US")));
+    }
+
     #[test]
     fn nested_math_text_is_taken_once() {
         // 200 `m:t` nested in each other around one word: the word, not 200 copies of it.
         let x = format!(r#"<a14:m xmlns:a14="a" xmlns:m="m"><m:oMath>{}word{}</m:oMath></a14:m>"#, "<m:t>".repeat(200), "</m:t>".repeat(200));
         let d = parse(x.as_bytes()).unwrap();
         let mut para = Paragraph::default();
-        push_math_run(&mut para, &crate::part::NoSource, &d);
+        push_math_run(&mut para, &crate::part::NoSource, &d, RunProps::default());
         assert_eq!(para.runs[0].text, "word");
     }
 

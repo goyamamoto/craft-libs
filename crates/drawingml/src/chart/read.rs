@@ -29,6 +29,12 @@ fn simple_line(sp: Option<&El>) -> Option<crate::style::Line> {
     Some(l)
 }
 
+/// A title's text direction (`a:bodyPr/@vert` of its rich text, else of its `c:txPr`).
+fn title_dir(t: &El) -> Option<crate::text::TextDir> {
+    let body = |e: Option<&El>| e.and_then(|e| e.child(Local("bodyPr"))).and_then(|b| b.attr_local("vert")).and_then(crate::text::TextDir::from_xml);
+    body(t.child(Local("tx")).and_then(|x| x.child(Local("rich")))).or_else(|| body(t.child(Local("txPr"))))
+}
+
 pub fn rich_text(t: &El) -> Option<String> {
     let tx = t.child(Local("tx"))?;
     if let Some(r) = tx.child(Local("rich")) {
@@ -481,6 +487,7 @@ fn read_axes<'a>(c: &mut Chart, pa: &'a El, primary_val: &Option<String>) -> (Op
         c.y_max =
             sc.and_then(|s| s.child(Local("max")).and_then(|c| c.attr_local("val"))).and_then(|v| v.parse().ok()).filter(|v: &f64| v.is_finite());
         c.axis_titles.1 = v.child(Local("title")).map(|t| rich_text(t).unwrap_or_else(|| "Axis Title".into()));
+        c.axis_title_dirs.1 = v.child(Local("title")).and_then(title_dir);
         c.y_major = num(v, "majorUnit");
         c.y_log_base = sc
             .and_then(|s| s.child(Local("logBase")).and_then(|c| c.attr_local("val")))
@@ -493,6 +500,7 @@ fn read_axes<'a>(c: &mut Chart, pa: &'a El, primary_val: &Option<String>) -> (Op
         c.cat_reversed =
             a.child(Local("scaling")).and_then(|s| s.child(Local("orientation")).and_then(|c| c.attr_local("val"))).is_some_and(|o| o == "maxMin");
         c.axis_titles.0 = a.child(Local("title")).map(|t| rich_text(t).unwrap_or_else(|| "Axis Title".into()));
+        c.axis_title_dirs.0 = a.child(Local("title")).and_then(title_dir);
     }
     (val_ax, cat_ax)
 }
@@ -670,6 +678,25 @@ mod tests {
         // A small chart is untouched by the default budget.
         let c = chart_from(&doc).unwrap();
         assert!(c.series.iter().all(|s| s.values.len() == 100_000));
+    }
+
+    /// Format Axis Title ▸ Text direction (stacked 縦書き, East Asian vertical) is the title's
+    /// `a:bodyPr/@vert`, in its rich text or else its `c:txPr`; it is read and written back.
+    #[test]
+    fn axis_title_text_direction_is_read_and_written_back() {
+        use crate::text::TextDir;
+        let xml = r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:plotArea><c:barChart><c:barDir val="col"/><c:axId val="1"/><c:axId val="2"/></c:barChart><c:catAx><c:axId val="1"/><c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>月</a:t></a:r></a:p></c:rich></c:tx><c:txPr><a:bodyPr vert="eaVert"/></c:txPr></c:title></c:catAx><c:valAx><c:axId val="2"/><c:title><c:tx><c:rich><a:bodyPr rot="0" vert="wordArtVert"/><a:p><a:r><a:t>売上高（百万円）</a:t></a:r></a:p></c:rich></c:tx></c:title></c:valAx></c:plotArea></c:chart></c:chartSpace>"#;
+        let c = read_chart_xml(xml.as_bytes()).unwrap();
+        assert_eq!(c.axis_titles.1.as_deref(), Some("売上高（百万円）"));
+        assert_eq!(c.axis_title_dirs, (Some(TextDir::EaVertical), Some(TextDir::Stacked)));
+        let mut edited = c.clone();
+        edited.raw = None;
+        edited.y_max = Some(50.0);
+        let back = read_chart_xml(&crate::chart::write::chart_xml(&edited).0).unwrap();
+        assert_eq!(back.axis_title_dirs, (Some(TextDir::EaVertical), Some(TextDir::Stacked)));
+        // No direction: the default turned title.
+        let plain = Chart { axis_titles: (None, Some("Amount".into())), ..Chart::sample(ChartType::Column) };
+        assert_eq!(read_chart_xml(&crate::chart::write::chart_xml(&plain).0).unwrap().axis_title_dirs, (None, None));
     }
 
     #[test]

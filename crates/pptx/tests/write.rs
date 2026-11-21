@@ -325,3 +325,31 @@ fn templates_and_shows_differ_in_the_main_content_type() {
         assert_eq!(craft_pptx::import(&bytes, &Plain).unwrap().slides.len(), 1);
     }
 }
+
+/// A deck's own line-breaking characters (`p:kinsoku`, written between `p:custDataLst` and
+/// `p:defaultTextStyle`) and a run's `kumimoji` survive writing and reading.
+#[test]
+fn kinsoku_and_kumimoji_survive_writing_and_reading() {
+    let mut p = deck();
+    p.kinsoku = Some(craft_pptx::Kinsoku { lang: Some("ja-JP".into()), start: "、。）".into(), end: "（「".into() });
+    let mut text = TextBody::from_text("日本語");
+    for para in &mut text.paragraphs {
+        for r in &mut para.runs {
+            r.props.lang = Some("ja-JP".into());
+            r.props.alt_lang = Some("en-US".into());
+            r.props.kumimoji = Some(true);
+        }
+    }
+    add(&mut p, Shape { name: "Box".into(), xfrm: Some(Xfrm::new(10.0, 20.0, 200.0, 100.0)), text: Some(text), ..Default::default() });
+    let bytes = craft_pptx::export(&p, &Plain).unwrap();
+    let pres = part(&bytes, "ppt/presentation.xml");
+    let k = pres.find("<p:kinsoku").expect("p:kinsoku written");
+    assert!(k < pres.find("<p:defaultTextStyle").unwrap(), "{pres}");
+    let q = craft_pptx::import(&bytes, &Plain).unwrap();
+    assert_eq!(q.kinsoku, p.kinsoku);
+    let run = &q.slides[0].shapes[0].text.as_ref().unwrap().paragraphs[0].runs[0];
+    assert_eq!((run.props.kumimoji, run.props.alt_lang.as_deref()), (Some(true), Some("en-US")));
+    // A deck without one writes none.
+    let bytes = craft_pptx::export(&deck(), &Plain).unwrap();
+    assert!(!part(&bytes, "ppt/presentation.xml").contains("kinsoku"));
+}

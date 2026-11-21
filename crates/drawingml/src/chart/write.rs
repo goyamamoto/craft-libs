@@ -133,10 +133,10 @@ fn legend_entry(w: &mut Writer, e: &crate::chart::LegendEntry) {
     w.close();
 }
 
-fn rich(w: &mut Writer, text: &str, color: Option<&crate::style::ColorRef>) {
+fn rich(w: &mut Writer, text: &str, color: Option<&crate::style::ColorRef>, dir: Option<crate::text::TextDir>) {
     w.open("c:tx", &[]);
     w.open("c:rich", &[]);
-    w.empty("a:bodyPr", &[]);
+    w.tag("a:bodyPr").attr_opt("vert", dir.map(crate::text::TextDir::xml)).empty();
     w.empty("a:lstStyle", &[]);
     for line in text.split('\n') {
         w.open("a:p", &[]);
@@ -159,10 +159,16 @@ fn rich(w: &mut Writer, text: &str, color: Option<&crate::style::ColorRef>) {
     w.close();
 }
 
-/// A title (the chart's or an axis's) in the chart's text colour.
+/// The chart's title, in the chart's text colour (an axis title goes through [`axis_title`]).
 fn title(w: &mut Writer, text: &str, c: &Chart) {
+    axis_title(w, text, c, None);
+}
+
+/// A title in the chart's text colour and text direction `dir` (an axis title's Text direction;
+/// `None` the default).
+fn axis_title(w: &mut Writer, text: &str, c: &Chart, dir: Option<crate::text::TextDir>) {
     w.open("c:title", &[]);
-    rich(w, text, c.text_color.as_ref());
+    rich(w, text, c.text_color.as_ref(), dir);
     w.tag("c:overlay").attr("val", 0).empty();
     w.close();
 }
@@ -472,7 +478,7 @@ fn axes(w: &mut Writer, c: &Chart, g: Group) {
         w.tag("c:delete").attr("val", 0).empty();
         w.tag("c:axPos").attr("val", "b").empty();
         if let Some(t) = &c.axis_titles.0 {
-            title(w, t, c);
+            axis_title(w, t, c, c.axis_title_dirs.0);
         }
         w.tag("c:numFmt").attr("formatCode", "General").attr("sourceLinked", 1).empty();
         w.tag("c:majorTickMark").attr("val", "out").empty();
@@ -492,7 +498,7 @@ fn axes(w: &mut Writer, c: &Chart, g: Group) {
         w.tag("c:delete").attr("val", 0).empty();
         w.tag("c:axPos").attr("val", cat_pos).empty();
         if let Some(t) = &c.axis_titles.0 {
-            title(w, t, c);
+            axis_title(w, t, c, c.axis_title_dirs.0);
         }
         w.tag("c:numFmt").attr("formatCode", "General").attr("sourceLinked", 1).empty();
         w.tag("c:majorTickMark").attr("val", "none").empty();
@@ -530,7 +536,7 @@ fn axes(w: &mut Writer, c: &Chart, g: Group) {
         w.empty("c:minorGridlines", &[]);
     }
     if let Some(t) = &c.axis_titles.1 {
-        title(w, t, c);
+        axis_title(w, t, c, c.axis_title_dirs.1);
     }
     match c.y_format.as_deref().filter(|f| !f.is_empty()) {
         Some(f) => w.tag("c:numFmt").attr("formatCode", f).attr("sourceLinked", 0).empty(),
