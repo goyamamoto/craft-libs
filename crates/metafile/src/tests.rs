@@ -2790,3 +2790,67 @@ fn wmf_viewport_scaling_before_first_window_is_retained() {
     assert_eq!(p.skipped_records, 0);
     assert_eq!(rect_extent(&p.items[0]), (0.0, 0.0, 50.0, 100.0));
 }
+
+#[test]
+fn face_names_decode_in_the_font_code_page_and_at_marks_vertical_fonts() {
+    // ＭＳ ゴシック in CP932.
+    let gothic = [0x82, 0x6C, 0x82, 0x72, 0x20, 0x83, 0x53, 0x83, 0x56, 0x83, 0x62, 0x83, 0x4E];
+    let font_of = |charset: u8, face: &[u8]| {
+        let p = wmf200(&[wfont(-10, 400, [0, 0, 0], charset, 2700, face), wrec(0x012D, &h16(0)), wtext(0, 0, b"x", 0, None, &[])]);
+        texts(&p)[0].font.clone()
+    };
+    let f = font_of(128, &gothic);
+    assert_eq!((f.family.as_str(), f.vertical), ("ＭＳ ゴシック", false));
+    let at: Vec<u8> = [b'@'].iter().chain(&gothic).copied().collect();
+    let f = font_of(128, &at);
+    assert_eq!((f.family.as_str(), f.vertical, f.charset), ("ＭＳ ゴシック", true, 128));
+    // A symbol font's name is plain text, not symbol codes.
+    assert_eq!(font_of(2, b"Wingdings").family, "Wingdings");
+    // EMF names are UTF-16.
+    let recs = [efont(-10, 2700, 400, 0, 128, "@メイリオ"), erec(37, &h32(1)), etext(true, 0, 0, &[0x4E00], 0, &[])];
+    let p = parse(&emf(&recs, [0, 0, 200, 100], [0, 0, 5000, 2500])).unwrap();
+    let t = texts(&p)[0];
+    assert_eq!((t.font.family.as_str(), t.font.vertical), ("メイリオ", true));
+    // Escapement 2700: the baseline runs down the picture.
+    let [a, b, ..] = t.transform;
+    assert!(a.abs() < 1e-9 && b > 0.0, "{:?}", t.transform);
+}
+
+#[test]
+fn emfplus_vertical_string_format_runs_columns_down_the_rectangle() {
+    let fmt = |flags: u32, align: u32| prec(0x4008, 0x0700 | 4, &cat(vec![h32(0xDBC0_1002), h32(flags), h32(0), h32(align), h32(0)]));
+    let pic = |flags: u32, align: u32| {
+        plus_pic(vec![
+            prec(0x400A, 0x8000, &cat(vec![h32(0xFFFF_FFFF), h32(1), f32s(&[0.0, 0.0, 60.0, 100.0])])),
+            prec(0x4008, 0x0600 | 3, &font_obj("Yu Gothic", 10.0, 0, 0)),
+            fmt(flags, align),
+            prec(0x401C, 0x8000 | 3, &cat(vec![h32(0xFF00_0000), h32(4), h32(6), f32s(&[0.0, 0.0, 60.0, 100.0]), u16s("縦書き\n二行")])),
+        ])
+    };
+    let p = pic(0x2 | 0x4000, 0);
+    let t = texts(&p);
+    assert_eq!(t.iter().map(|t| t.text.as_str()).collect::<Vec<_>>(), ["縦書き", "二行"]);
+    for t in &t {
+        assert!(t.font.vertical && t.font.family == "Yu Gothic", "{:?}", t.font);
+        assert_eq!((t.h_align, t.v_align), (HAlign::Left, VAlign::Baseline));
+    }
+    // 12-unit columns (1.2 em) from the left; each baseline 0.38 em left of its column's centre
+    // line, running down from the top.
+    assert!(close6(t[0].transform, [0.0, 1.0, -1.0, 0.0, 6.0 - 3.8, 0.0]), "{:?}", t[0].transform);
+    assert!(close6(t[1].transform, [0.0, 1.0, -1.0, 0.0, 18.0 - 3.8, 0.0]), "{:?}", t[1].transform);
+    // Right to left: the first column at the right edge. Centred along the column.
+    let p = pic(0x1 | 0x2 | 0x4000, 1);
+    let t = texts(&p);
+    assert!(close(t[0].transform[4] as f32, 54.0 - 3.8) && close(t[1].transform[4] as f32, 42.0 - 3.8), "{:?}", t);
+    assert!(close(t[0].transform[5] as f32, 50.0) && t[0].h_align == HAlign::Center);
+    // Without the flag the same string runs across.
+    let p = pic(0x4000, 0);
+    let t = texts(&p);
+    assert!(!t[0].font.vertical && close6(t[0].transform, [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]), "{:?}", t[0]);
+    // An `@` font name is a vertical font in EMF+ too.
+    let p = plus_pic(vec![
+        prec(0x4008, 0x0600 | 3, &font_obj("@Yu Gothic", 10.0, 0, 0)),
+        prec(0x401C, 0x8000 | 3, &cat(vec![h32(0xFF00_0000), h32(9), h32(1), f32s(&[0.0, 0.0, 60.0, 100.0]), u16s("一")])),
+    ]);
+    assert!(texts(&p).first().is_some_and(|t| t.font.vertical && t.font.family == "Yu Gothic"), "{:?}", p.items);
+}

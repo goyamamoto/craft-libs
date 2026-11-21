@@ -388,8 +388,10 @@ fn create_font(cv: &mut Canvas, r: Bytes) -> Option<()> {
     let byte = |o: usize| r.0.get(o).copied().unwrap_or(0);
     let units: Vec<u16> = (0..32).map_while(|i| r.u16(40 + 2 * i)).take_while(|u| *u != 0).collect();
     let (family, _) = decode_utf16(&units, &[]);
+    let (family, vertical) = crate::text::face_name(&family);
     let font = Font {
-        family: family.trim().to_string(),
+        family,
+        vertical,
         height: height as f32,
         width: width as f32,
         weight: weight.clamp(0, 1000) as u16,

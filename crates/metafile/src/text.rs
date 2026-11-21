@@ -19,6 +19,21 @@ pub struct Font {
     pub strike: bool,
     /// LOGFONT character set (0 ANSI, 2 SYMBOL, 238 EASTEUROPE…).
     pub charset: u8,
+    /// The vertical version of an East Asian font, which GDI selects by an `@` before the face
+    /// name ([`Font::family`] is without it): along a baseline running down the page
+    /// (escapement 2700) its full-width and CJK characters stand upright while Latin text lies on
+    /// its side. EMF+ strings in a vertical string format are drawn the same way.
+    pub vertical: bool,
+}
+
+/// A LOGFONT face name without the `@` of a vertical font ([`Font::vertical`]), trimmed, and
+/// whether it was there.
+pub(crate) fn face_name(name: &str) -> (String, bool) {
+    let name = name.trim();
+    match name.strip_prefix('@') {
+        Some(rest) => (rest.trim().to_string(), true),
+        None => (name.to_string(), false),
+    }
 }
 
 /// SYMBOL_CHARSET: byte codes are the font's own symbol codes.

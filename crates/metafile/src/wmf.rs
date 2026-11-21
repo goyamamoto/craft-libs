@@ -272,9 +272,11 @@ fn font(r: Bytes) -> Option<LogFont> {
     // A face name is in the font's own code page (East Asian fonts are often named in their
     // script); a symbol font's name is not in symbol codes.
     let (family, _) = decode_bytes(name, if charset == crate::SYMBOL_CHARSET { 0 } else { charset }, &[]);
+    let (family, vertical) = crate::text::face_name(&family);
     Some(LogFont {
         font: Font {
-            family: family.trim().to_string(),
+            family,
+            vertical,
             height: f32::from(height),
             width: f32::from(width),
             weight: weight.clamp(0, 1000) as u16,
